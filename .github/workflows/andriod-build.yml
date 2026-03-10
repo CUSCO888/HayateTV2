@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch: # 允许在 GitHub Actions 页面手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,12 +17,20 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        cache: 'npm'
 
-    - name: Install dependencies
-      run: npm install
+    - name: Install Dependencies
+      run: |
+        # 1. 安装 package.json 中的原始依赖
+        npm install
+        # 2. 强制补齐缺少的 Capacitor 核心组件
+        npm install @capacitor/core @capacitor/android
+        npm install -D @capacitor/cli
 
     - name: Build Web App
-      run: npm run build
+      run: |
+        # 构建前端产物 (生成 dist 文件夹)
+        npm run build
 
     - name: Setup Java
       uses: actions/setup-java@v4
@@ -30,50 +38,25 @@ jobs:
         distribution: 'zulu'
         java-version: '17'
 
-    - name: Initialize Capacitor Android
+    - name: Initialize Capacitor & Android Platform
       run: |
-        npx cap add android
+        # 3. 检查并自动创建 capacitor.config.json (如果不存在)
+        if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
+          npx cap init HayateTV2 com.hayatetv.app --web-dir dist
+        fi
+        
+        # 4. 检查并添加 Android 平台
+        # 如果目录不存在则添加，存在则同步
+        if [ ! -d "android" ]; then
+          npx cap add android
+        fi
         npx cap sync android
 
     - name: Build Debug APK
       working-directory: ./android
-      run: ./gradlew assembleDebug
+      run: |
+        chmod +x gradlew
+        ./gradlew assembleDebug
 
     - name: Upload Debug APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-debug
-        path: android/app/build/outputs/apk/debug/app-debug.apk
-
-    # =====================================================================
-    # 验证与签名 (Release APK)
-    # 如果您需要在应用商店发布，或者需要一个正式签名的 APK，请取消注释以下部分。
-    # 您需要先在 GitHub 仓库的 Settings -> Secrets and variables -> Actions 中
-    # 添加以下 Secrets:
-    # 1. SIGNING_KEY (Keystore 文件的 Base64 编码)
-    # 2. ALIAS (Keystore 的别名)
-    # 3. KEY_STORE_PASSWORD (Keystore 的密码)
-    # 4. KEY_PASSWORD (密钥的密码)
-    # =====================================================================
-    
-    # - name: Build Release APK
-    #   working-directory: ./android
-    #   run: ./gradlew assembleRelease
-    #
-    # - name: Sign Release APK
-    #   uses: r0adkll/sign-android-release@v1
-    #   id: sign_app
-    #   with:
-    #     releaseDirectory: android/app/build/outputs/apk/release
-    #     signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-    #     alias: ${{ secrets.ALIAS }}
-    #     keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-    #     keyPassword: ${{ secrets.KEY_PASSWORD }}
-    #   env:
-    #     BUILD_TOOLS_VERSION: "34.0.0"
-    #
-    # - name: Upload Release APK
-    #   uses: actions/upload-artifact@v4
-    #   with:
-    #     name: app-release-signed
-    #     path: ${{steps.sign_app.outputs.signedReleaseFile}}
+      uses: actions/upload-
