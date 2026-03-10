@@ -1,0 +1,5 @@
+{
+  "name": "HayateTV",
+  "description": "A multi-language IPTV player for Android TV with M3U and EPG support.",
+  "requestFramePermissions": []
+}
