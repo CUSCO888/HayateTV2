@@ -52,12 +52,24 @@ jobs:
         fi
         npx cap sync android
 
+    - name: Build Debug APK
+      working-directory: ./android
+      run: |
+        chmod +x gradlew
+        ./gradlew assembleDebug
+
+    # --- 新增：探测所有生成的 APK 路径 ---
+    - name: List all files to find APK
+      run: |
+        echo "Searching for APK files..."
+        find . -name "*.apk"
+        echo "Current directory structure for outputs:"
+        ls -R android/app/build/outputs/ || echo "Outputs directory not found"
+
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
       with:
         name: app-debug
-        # 使用通配符递归查找所有 .apk 文件
-        path: |
-          android/app/build/outputs/apk/**/*.apk
-        # 如果还是没找到，让 CI 报错而不是静默通过，方便排查
+        # 尝试使用根目录起始的通配符
+        path: "**/*.apk" 
         if-no-files-found: error
