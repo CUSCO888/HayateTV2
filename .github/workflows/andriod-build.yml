@@ -52,11 +52,8 @@ jobs:
         fi
         npx cap sync android
 
-    - name: Build Debug APK
-      working-directory: ./android
-      run: |
-        chmod +x gradlew
-        ./gradlew assembleDebug
-
     - name: Upload Debug APK
-      uses: actions/upload-
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-debug
+        path: android/app/build/outputs/apk/debug/app-debug.apk
