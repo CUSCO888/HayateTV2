@@ -40,16 +40,22 @@ jobs:
 
     - name: Initialize Capacitor & Android Platform
       run: |
-        # 3. 检查并自动创建 capacitor.config.json (如果不存在)
-        if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
-          npx cap init HayateTV2 com.hayatetv.app --web-dir dist
-        fi
+        # 1. 确保安装了最新 CLI
+        npm install -D @capacitor/cli @capacitor/android
         
-        # 4. 检查并添加 Android 平台
-        # 如果目录不存在则添加，存在则同步
+        # 2. 如果目录不存在则添加
         if [ ! -d "android" ]; then
           npx cap add android
         fi
+
+        # 3. 动态修复 Kotlin 冲突 (针对新版 Capacitor 6+)
+        # 这行脚本会自动在 android/build.gradle 中强制统一 Kotlin 版本
+        sed -i 's/kotlin_version = .*/kotlin_version = "1.9.20"/' android/build.gradle
+        
+        # 4. 动态在 app/build.gradle 中加入强制策略
+        echo "configurations.all { resolutionStrategy.eachDependency { details -> if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.contains('kotlin-stdlib-jdk')) { details.useTarget(\"org.jetbrains.kotlin:kotlin-stdlib:\${details.requested.version}\") } } }" >> android/app/build.gradle
+
+        # 5. 最后同步并构建
         npx cap sync android
 
     - name: Build Debug APK
