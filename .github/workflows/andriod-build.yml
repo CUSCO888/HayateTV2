@@ -56,4 +56,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: app-debug
-        path: android/app/build/outputs/apk/debug/app-debug.apk
+        # 使用通配符递归查找所有 .apk 文件
+        path: |
+          android/app/build/outputs/apk/**/*.apk
+        # 如果还是没找到，让 CI 报错而不是静默通过，方便排查
+        if-no-files-found: error
