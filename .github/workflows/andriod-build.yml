@@ -22,60 +22,38 @@ jobs:
     - name: Install Dependencies
       run: |
         npm install
-        # 安装图标生成工具和 Capacitor 核心
+        # 强制安装 Capacitor 核心和图标生成工具
         npm install @capacitor/core @capacitor/android
         npm install -D @capacitor/cli @capacitor/assets
 
-    - name: Generate Icons and Initialize
-      run: |
-        # 1. 构建 Web 产物 (确保 Vite 的 base: './' 已修改)
-        npm run build
-
-        # 2. 如果没有 android 目录则创建
-        if [ ! -d "android" ]; then
-          npx cap add android
-        fi
-
-        # 3. 自动生成 Android 图标资源
-        # 假设你的图标文件放在根目录的 assets/icon.png
-        # 如果文件不存在，这一步会跳过
-        if [ -f "assets/icon.png" ]; then
-          npx capacitor-assets generate --android
-        fi
-
-        # 4. 执行之前的动态修复逻辑 (Kotlin 冲突修复)
-        sed -i 's/kotlin_version = .*/kotlin_version = "1.9.20"/' android/build.gradle
-        echo "configurations.all { resolutionStrategy.eachDependency { details -> if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.contains('kotlin-stdlib-jdk')) { details.useTarget(\"org.jetbrains.kotlin:kotlin-stdlib:\${details.requested.version}\") } } }" >> android/app/build.gradle
-        
-        # 5. 同步资源
-        npx cap sync android
-
     - name: Build Web App
       run: |
-        # 执行 Vite 构建生成 dist 文件夹
+        # 这一步非常关键：必须先生成 dist 文件夹
         npm run build
 
     - name: Setup Java
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
-        java-version: '21' # 必须使用 Java 21 以匹配最新 Android SDK
+        java-version: '21'
 
-    - name: Initialize Capacitor & Android Platform
+    - name: Initialize & Sync Capacitor
       run: |
-        # 如果项目没有 android 目录则自动创建
+        # 1. 如果没有 android 目录则添加
         if [ ! -d "android" ]; then
           npx cap add android
         fi
+
+        # 2. 自动生成图标 (前提：你根目录下需要有一个 assets/icon.png)
+        if [ -f "assets/icon.png" ]; then
+          npx capacitor-assets generate --android
+        fi
         
-        # --- 动态修复 Kotlin 库冲突 (Duplicate class) ---
-        # 强制统一项目中的 Kotlin 版本
+        # 3. 动态修复 Kotlin 冲突 (Duplicate class)
         sed -i 's/kotlin_version = .*/kotlin_version = "1.9.20"/' android/build.gradle
-        
-        # 在 app/build.gradle 中注入解析策略，解决 jdk7/jdk8 重复定义问题
         echo "configurations.all { resolutionStrategy.eachDependency { details -> if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.contains('kotlin-stdlib-jdk')) { details.useTarget(\"org.jetbrains.kotlin:kotlin-stdlib:\${details.requested.version}\") } } }" >> android/app/build.gradle
         
-        # 将 Web 产物同步到原生工程
+        # 4. 关键：将最新的构建产物同步到 Android 工程
         npx cap sync android
 
     - name: Build Debug APK
@@ -86,11 +64,10 @@ jobs:
 
     - name: Rename and Prepare APK
       run: |
-        # 将生成的默认 apk 重命名并移动到根目录，方便直接下载
         if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
           mv android/app/build/outputs/apk/debug/app-debug.apk ./hayatetv.apk
         else
-          echo "Error: APK not found at expected path"
+          echo "Error: APK not found"
           exit 1
         fi
 
@@ -98,6 +75,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: HayateTV_Installation_Package
-        # 指定上传重命名后的文件，这样下载的压缩包里直接就是这个文件
         path: hayatetv.apk
         if-no-files-found: error
