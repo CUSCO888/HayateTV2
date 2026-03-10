@@ -22,9 +22,33 @@ jobs:
     - name: Install Dependencies
       run: |
         npm install
-        # 强制补齐 Capacitor 核心组件以确保 npx cap 命令可用
+        # 安装图标生成工具和 Capacitor 核心
         npm install @capacitor/core @capacitor/android
-        npm install -D @capacitor/cli
+        npm install -D @capacitor/cli @capacitor/assets
+
+    - name: Generate Icons and Initialize
+      run: |
+        # 1. 构建 Web 产物 (确保 Vite 的 base: './' 已修改)
+        npm run build
+
+        # 2. 如果没有 android 目录则创建
+        if [ ! -d "android" ]; then
+          npx cap add android
+        fi
+
+        # 3. 自动生成 Android 图标资源
+        # 假设你的图标文件放在根目录的 assets/icon.png
+        # 如果文件不存在，这一步会跳过
+        if [ -f "assets/icon.png" ]; then
+          npx capacitor-assets generate --android
+        fi
+
+        # 4. 执行之前的动态修复逻辑 (Kotlin 冲突修复)
+        sed -i 's/kotlin_version = .*/kotlin_version = "1.9.20"/' android/build.gradle
+        echo "configurations.all { resolutionStrategy.eachDependency { details -> if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.contains('kotlin-stdlib-jdk')) { details.useTarget(\"org.jetbrains.kotlin:kotlin-stdlib:\${details.requested.version}\") } } }" >> android/app/build.gradle
+        
+        # 5. 同步资源
+        npx cap sync android
 
     - name: Build Web App
       run: |
