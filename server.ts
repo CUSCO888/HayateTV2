@@ -1,143 +1,131 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import cors from "cors";
-import os from "os";
+import axios from "axios";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || "3000", 10);
+  const PORT = 3000;
 
-  app.use(cors());
   app.use(express.json());
 
-  // Simple in-memory store for remote input
-  let remoteData = {
+  // Remote Input State (In-memory for simplicity)
+  let remoteInputData = {
     playlistUrl: "",
     epgUrl: "",
-    timestamp: 0,
+    timestamp: 0
   };
 
-  // Get LAN IP
-  app.get("/api/ip", (req, res) => {
-    const interfaces = os.networkInterfaces();
-    let lanIp = "127.0.0.1";
-    for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name]!) {
-        if (iface.family === "IPv4" && !iface.internal) {
-          lanIp = iface.address;
-          break;
-        }
-      }
+  // Proxy Endpoint
+  app.get("/api/proxy", async (req, res) => {
+    const targetUrl = req.query.url as string;
+    if (!targetUrl) {
+      return res.status(400).send("Missing URL parameter");
     }
-    res.json({ ip: lanIp, port: PORT });
+
+    try {
+      const response = await axios.get(targetUrl, {
+        responseType: "arraybuffer",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        },
+        timeout: 10000
+      });
+
+      res.set("Content-Type", response.headers["content-type"]);
+      res.set("Access-Control-Allow-Origin", "*");
+      res.send(response.data);
+    } catch (error: any) {
+      console.error("Proxy error:", error.message);
+      res.status(500).send("Proxy error: " + error.message);
+    }
   });
 
-  // Receive data from mobile
-  app.post("/api/remote", (req, res) => {
+  // Remote Input API
+  app.post("/api/remote-input", (req, res) => {
     const { playlistUrl, epgUrl } = req.body;
-    remoteData = {
-      playlistUrl: playlistUrl || "",
-      epgUrl: epgUrl || "",
-      timestamp: Date.now(),
+    remoteInputData = {
+      playlistUrl,
+      epgUrl,
+      timestamp: Date.now()
     };
     res.json({ success: true });
   });
 
-  // Poll data from TV
-  app.get("/api/remote/poll", (req, res) => {
-    res.json(remoteData);
+  app.get("/api/remote-input/poll", (req, res) => {
+    res.json(remoteInputData);
   });
 
-  // Serve the remote input HTML page
+  // Mobile Remote Input Page
   app.get("/remote", (req, res) => {
     res.send(`
       <!DOCTYPE html>
-      <html lang="en">
+      <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>HayateTV Remote Input</title>
         <style>
-          body { font-family: system-ui, sans-serif; background: #111; color: #fff; padding: 20px; max-width: 500px; margin: 0 auto; }
-          h2 { color: #3b82f6; text-align: center; margin-bottom: 30px; }
-          .form-group { margin-bottom: 20px; }
-          label { display: block; margin-bottom: 8px; color: #9ca3af; }
-          input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #374151; background: #1f2937; color: #fff; box-sizing: border-box; font-size: 16px; }
-          input:focus { outline: none; border-color: #3b82f6; }
-          button { width: 100%; padding: 14px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-          button:active { background: #1d4ed8; }
-          #status { margin-top: 20px; text-align: center; color: #10b981; display: none; }
+          body { font-family: sans-serif; padding: 20px; background: #121212; color: white; }
+          .container { max-width: 400px; margin: 0 auto; }
+          h1 { font-size: 24px; margin-bottom: 20px; color: #00e676; }
+          .field { margin-bottom: 15px; }
+          label { display: block; margin-bottom: 5px; font-size: 14px; color: #aaa; }
+          input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #1e1e1e; color: white; box-sizing: border-box; }
+          button { width: 100%; padding: 15px; border-radius: 8px; border: none; background: #00e676; color: black; font-weight: bold; font-size: 16px; cursor: pointer; margin-top: 10px; }
+          button:active { opacity: 0.8; }
+          .status { margin-top: 20px; text-align: center; font-size: 14px; }
         </style>
       </head>
       <body>
-        <h2>HayateTV Remote Input</h2>
-        <form id="remoteForm">
-          <div class="form-group">
+        <div class="container">
+          <h1>HayateTV Remote</h1>
+          <div class="field">
             <label>Playlist URL (M3U/TXT)</label>
-            <input type="text" id="playlistUrl" placeholder="http://...">
+            <input type="text" id="playlist" placeholder="https://...">
           </div>
-          <div class="form-group">
+          <div class="field">
             <label>EPG URL (XMLTV)</label>
-            <input type="text" id="epgUrl" placeholder="http://...">
+            <input type="text" id="epg" placeholder="https://...">
           </div>
-          <button type="submit">Upload to TV</button>
-          <div id="status">Successfully sent to TV!</div>
-        </form>
+          <button onclick="submit()">Upload to TV</button>
+          <div id="status" class="status"></div>
+        </div>
         <script>
-          document.getElementById('remoteForm').onsubmit = async (e) => {
-            e.preventDefault();
-            const p = document.getElementById('playlistUrl').value;
-            const epg = document.getElementById('epgUrl').value;
-            
-            const btn = document.querySelector('button');
-            btn.textContent = 'Uploading...';
-            btn.disabled = true;
-
+          async function submit() {
+            const playlistUrl = document.getElementById('playlist').value;
+            const epgUrl = document.getElementById('epg').value;
+            const status = document.getElementById('status');
+            status.innerText = 'Sending...';
             try {
-              await fetch('/api/remote', {
+              const res = await fetch('/api/remote-input', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ playlistUrl: p, epgUrl: epg })
+                body: JSON.stringify({ playlistUrl, epgUrl })
               });
-              document.getElementById('status').style.display = 'block';
-              setTimeout(() => { document.getElementById('status').style.display = 'none'; }, 3000);
-            } catch (err) {
-              alert('Error uploading to TV');
-            } finally {
-              btn.textContent = 'Upload to TV';
-              btn.disabled = false;
+              if (res.ok) {
+                status.innerText = 'Successfully uploaded to TV!';
+                status.style.color = '#00e676';
+              } else {
+                status.innerText = 'Failed to upload.';
+                status.style.color = '#ff5252';
+              }
+            } catch (e) {
+              status.innerText = 'Error: ' + e.message;
+              status.style.color = '#ff5252';
             }
-          };
+          }
         </script>
       </body>
       </html>
     `);
   });
 
-  app.get("/api/proxy", async (req, res) => {
-    const targetUrl = req.query.url as string;
-    if (!targetUrl) {
-      res.status(400).json({ error: "URL is required" });
-      return;
-    }
-    try {
-      const response = await fetch(targetUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-      });
-      if (!response.ok) {
-        res.status(response.status).send(response.statusText);
-        return;
-      }
-      const text = await response.text();
-      res.setHeader("Content-Type", response.headers.get("content-type") || "text/plain");
-      res.send(text);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
+  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -145,11 +133,14 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
+    app.use(express.static(path.join(__dirname, "dist")));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(__dirname, "dist", "index.html"));
+    });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
