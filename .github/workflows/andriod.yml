@@ -29,8 +29,17 @@ jobs:
       - name: Build Web App
         run: npm run build
 
+      - name: Add Android Platform if missing
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
       - name: Sync Capacitor
-        run: npx cap sync
+        run: npx cap sync android
+
+      - name: Make Gradlew Executable
+        run: chmod +x android/gradlew
 
       - name: Build Android APK
         run: |
