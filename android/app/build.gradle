@@ -2,11 +2,11 @@ apply plugin: 'com.android.application'
 
 android {
     namespace = "com.hayatetv.app"
-    compileSdk = rootProject.ext.compileSdkVersion
+    compileSdk = project.hasProperty('compileSdkVersion') ? project.compileSdkVersion : 34
     defaultConfig {
         applicationId "com.hayatetv.app"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
+        minSdkVersion project.hasProperty('minSdkVersion') ? project.minSdkVersion : 22
+        targetSdkVersion project.hasProperty('targetSdkVersion') ? project.targetSdkVersion : 34
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -32,13 +32,13 @@ repositories {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
-    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
-    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.appcompat:appcompat:${project.hasProperty('androidxAppCompatVersion') ? project.androidxAppCompatVersion : '1.6.1'}"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:${project.hasProperty('androidxCoordinatorLayoutVersion') ? project.androidxCoordinatorLayoutVersion : '1.2.0'}"
+    implementation "androidx.core:core-splashscreen:${project.hasProperty('coreSplashScreenVersion') ? project.coreSplashScreenVersion : '1.0.1'}"
     implementation project(':capacitor-android')
-    testImplementation "junit:junit:$junitVersion"
-    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
-    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    testImplementation "junit:junit:${project.hasProperty('junitVersion') ? project.junitVersion : '4.13.2'}"
+    androidTestImplementation "androidx.test.ext:junit:${project.hasProperty('androidxJunitVersion') ? project.androidxJunitVersion : '1.1.5'}"
+    androidTestImplementation "androidx.test.espresso:espresso-core:${project.hasProperty('androidxEspressoCoreVersion') ? project.androidxEspressoCoreVersion : '3.5.1'}"
     implementation project(':capacitor-cordova-android-plugins')
 }
 
