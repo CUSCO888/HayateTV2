@@ -3,9 +3,14 @@ import { Channel } from '../types';
 export const DEFAULT_M3U_URL = "https://raw.githubusercontent.com/CUSCO888/spider/refs/heads/master/output/hayate.m3u";
 
 export function parseM3U(content: string): { channels: Channel[], epgUrl?: string } {
-  const lines = content.split('\n');
+  if (!content) return { channels: [] };
+
+  // More robust line splitting (handles \n, \r\n, \r)
+  const lines = content.split(/\r?\n/);
   const channels: Channel[] = [];
   let epgUrl: string | undefined;
+
+  console.log(`parseM3U: Processing ${lines.length} lines. First 100 chars: ${content.substring(0, 100)}`);
 
   // Try to find EPG URL in the whole content first (common in some playlists)
   const globalTvgMatch = content.match(/(?:x-tvg-url|url-tvg|#EXT-X-TVG-URL)\s*[:=]\s*["']?([^"'\s>]+)["']?/i);
@@ -18,8 +23,9 @@ export function parseM3U(content: string): { channels: Channel[], epgUrl?: strin
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
+    const upperLine = line.toUpperCase();
 
-    if (line.toUpperCase().includes('#EXTM3U')) {
+    if (upperLine.includes('#EXTM3U')) {
       // If not already found, try to extract from the header line specifically
       if (!epgUrl) {
         const tvgMatch = line.match(/(?:x-tvg-url|url-tvg)\s*=\s*["']?([^"'\s>]+)["']?/i);
@@ -31,11 +37,11 @@ export function parseM3U(content: string): { channels: Channel[], epgUrl?: strin
       continue;
     }
 
-    if (line.startsWith('#EXTINF:')) {
+    if (upperLine.startsWith('#EXTINF:')) {
       const nameMatch = line.match(/,(.*)$/);
-      const logoMatch = line.match(/tvg-logo="([^"]+)"/);
-      const groupMatch = line.match(/group-title="([^"]+)"/);
-      const idMatch = line.match(/tvg-id="([^"]+)"/);
+      const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
+      const groupMatch = line.match(/group-title="([^"]+)"/i);
+      const idMatch = line.match(/tvg-id="([^"]+)"/i);
 
       currentChannel = {
         name: nameMatch ? nameMatch[1].trim() : 'Unknown',
@@ -43,7 +49,8 @@ export function parseM3U(content: string): { channels: Channel[], epgUrl?: strin
         group: groupMatch ? groupMatch[1] : 'Default',
         tvgId: idMatch ? idMatch[1] : undefined
       };
-    } else if (line.startsWith('http')) {
+    } else if (line.length > 0 && !line.startsWith('#')) {
+      // Line is likely a URL if it's not empty and not a comment
       currentChannel.url = line;
       currentChannel.id = Math.random().toString(36).substr(2, 9);
       if (currentChannel.name && currentChannel.url) {

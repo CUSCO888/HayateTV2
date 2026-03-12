@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Settings, List, Lock, Play, ChevronRight, Clock } from 'lucide-react';
+import { Settings, List, Lock, Play, ChevronRight, Clock, Tv } from 'lucide-react';
+import { CapacitorHttp } from '@capacitor/core';
 import { Channel, EPGProgram, AppSettings, ViewState } from './types';
 import { translations } from './i18n';
 import { parseM3U, DEFAULT_M3U_URL } from './utils/parser';
@@ -37,9 +38,9 @@ const App: React.FC = () => {
       language: 'en',
       playlistMode: 'default',
       customPlaylistUrl: '',
-      epgUrl: '',
+      epgUrl: 'https://iptv-org.github.io/epg/guides/jp/skyperfectv.co.jp.xml',
       useInternetTime: true,
-      timezone: 'UTC+08:00'
+      timezone: 'UTC+09:00'
     };
   });
 
@@ -66,21 +67,45 @@ const App: React.FC = () => {
     const url = settings.playlistMode === 'default' ? DEFAULT_M3U_URL : settings.customPlaylistUrl;
     if (!url) return;
 
-    console.log("loadPlaylist triggered (v2.7). URL:", url);
+    console.log("loadPlaylist triggered (v3.4 - Native HTTP). URL:", url);
     setLoading(true);
     setError(null);
 
     try {
-      const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(url)}&t=${Date.now()}`;
-      console.log("Fetching from:", proxyUrl);
+      // 在原生平台（电视端）直接请求，绕过代理和安全检查
+      // 在浏览器预览时才使用代理
+      const isNative = window.hasOwnProperty('Capacitor') && (window as any).Capacitor.isNativePlatform();
+      const finalUrl = isNative
+        ? url
+        : `${API_BASE}/api/proxy?url=${encodeURIComponent(url)}&t=${Date.now()}`;
 
-      const response = await fetch(proxyUrl);
+      console.log(`Fetching Playlist (Native: ${isNative}):`, finalUrl);
 
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      // 使用 CapacitorHttp 绕过浏览器 CORS
+      const options = {
+        url: finalUrl,
+        headers: { 'Accept': 'text/plain, */*' }
+      };
 
-      const content = await response.text();
+      const response = await CapacitorHttp.get(options);
+
+      if (response.status !== 200) throw new Error(`HTTP error! status: ${response.status}`);
+
+      console.log("Native Response Data Type:", typeof response.data);
+
+      // 确保 content 是字符串
+      let content = '';
+      if (typeof response.data === 'string') {
+        content = response.data;
+      } else if (response.data && typeof response.data === 'object') {
+        console.log("Native Response Data keys:", Object.keys(response.data).slice(0, 10));
+        content = JSON.stringify(response.data);
+      }
+
       console.log("Playlist loaded successfully. Length:", content.length);
+      console.log("Content Preview (First 500 chars):", content.substring(0, 500));
       const { channels: parsedChannels, epgUrl: detectedEpg } = parseM3U(content);
+      console.log("Parsed channels count:", parsedChannels.length);
       setChannels(parsedChannels);
 
       if (detectedEpg && !settings.epgUrl) {
@@ -103,22 +128,54 @@ const App: React.FC = () => {
   }, [settings.playlistMode, settings.customPlaylistUrl, settings.epgUrl, t.error]);
 
   const loadEPG = useCallback(async () => {
-    console.log("loadEPG called with URL:", settings.epgUrl);
+    console.log("loadEPG called with URL (v3.4 - Native HTTP):", settings.epgUrl);
     if (!settings.epgUrl) {
       console.log("No EPG URL set");
       return;
     }
-    console.log("Loading EPG from:", settings.epgUrl);
     try {
-      const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(settings.epgUrl)}`;
-      const res = await axios.get(proxyUrl);
-      const parsedEPG = parseEPG(res.data);
-      console.log(`Parsed ${parsedEPG.length} EPG programs`);
-      setEpg(parsedEPG);
+      const isNative = window.hasOwnProperty('Capacitor') && (window as any).Capacitor.isNativePlatform();
+      const finalUrl = isNative
+        ? settings.epgUrl
+        : `${API_BASE}/api/proxy?url=${encodeURIComponent(settings.epgUrl)}&t=${Date.now()}`;
+
+      console.log(`Fetching EPG (Native: ${isNative}):`, finalUrl);
+
+      const options = {
+        url: finalUrl,
+        headers: { 'Accept': 'text/xml,application/xml' },
+        connectTimeout: 30000, // 30s timeout for large EPG
+        readTimeout: 30000
+      };
+
+      const response = await CapacitorHttp.get(options);
+      console.log("EPG Response Status:", response.status);
+      console.log("EPG Data Type:", typeof response.data);
+
+      if (response.status === 200) {
+        let content = '';
+        if (typeof response.data === 'string') {
+          content = response.data;
+        } else if (response.data && typeof response.data === 'object') {
+          content = JSON.stringify(response.data);
+        }
+
+        console.log("EPG Content Length:", content.length);
+        if (content.length > 0) {
+          console.log("Starting EPG parse...");
+          const parsedEPG = parseEPG(content);
+          console.log(`Parsed ${parsedEPG.length} EPG programs`);
+          setEpg(parsedEPG);
+        } else {
+          console.warn("EPG content is empty");
+        }
+      } else {
+        console.error("EPG fetch failed with status:", response.status);
+      }
     } catch (e) {
-      console.error("EPG Load Error", e);
+      console.error("EPG Load Error:", e);
     }
-  }, [settings.epgUrl]);
+  }, [settings.epgUrl, API_BASE]);
 
   useEffect(() => {
     loadPlaylist();
@@ -144,9 +201,10 @@ const App: React.FC = () => {
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await axios.get(`${API_BASE}/api/remote-input/poll?t=${Date.now()}`, {
-          withCredentials: false
-        });
+        const options = {
+          url: `${API_BASE}/api/remote-input/poll?t=${Date.now()}`
+        };
+        const res = await CapacitorHttp.get(options);
         if (res.data.timestamp > (Number(localStorage.getItem('last_remote_ts')) || 0)) {
           localStorage.setItem('last_remote_ts', res.data.timestamp.toString());
           setSettings(prev => ({
@@ -159,7 +217,7 @@ const App: React.FC = () => {
       } catch (e) {}
     }, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [API_BASE]);
 
   useEffect(() => {
     localStorage.setItem('hayate_settings', JSON.stringify(settings));
@@ -248,13 +306,18 @@ const App: React.FC = () => {
     // Normalize names for better matching
     const channelName = channel.name.toLowerCase().trim();
     const tvgId = channel.tvgId?.toLowerCase().trim();
+    const tvgName = channel.name.toLowerCase().replace(/\s+HD$/i, '').trim();
 
     return epg.find(p => {
       const pChannel = p.channel.toLowerCase().trim();
+
+      // Try multiple matching strategies
       const matchesId = tvgId && pChannel === tvgId;
       const matchesName = pChannel === channelName;
+      const matchesTvgName = pChannel === tvgName;
+      const fuzzyMatch = pChannel.includes(tvgName) || tvgName.includes(pChannel);
 
-      return (matchesId || matchesName) && now >= p.start && now < p.stop;
+      return (matchesId || matchesName || matchesTvgName || (fuzzyMatch && tvgName.length > 3)) && now >= p.start && now < p.stop;
     });
   };
 
@@ -313,7 +376,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0a] text-white font-sans overflow-hidden select-none">
+    <div className="fixed inset-0 bg-[#050505] text-white font-sans overflow-hidden select-none">
       {currentChannel && (
         <VideoPlayer
           url={currentChannel.url}
@@ -325,111 +388,124 @@ const App: React.FC = () => {
       )}
 
       {(viewState === 'channelList' || viewState === 'groupList') && (
-        <div className="absolute inset-0 flex z-10 bg-gradient-to-r from-black via-black/80 to-transparent">
+        <div className="absolute inset-0 flex z-10 bg-black">
           {/* Sidebar - Groups */}
-          <div className="w-80 h-full border-r border-white/10 flex flex-col bg-black/40 backdrop-blur-xl">
-            <div className="p-8 flex items-center gap-3">
-              <div className="w-10 h-10 bg-[#00e676] rounded-xl flex items-center justify-center shadow-lg shadow-[#00e676]/20 overflow-hidden">
+          <div className="w-[25vw] h-full border-r border-white/5 flex flex-col bg-[#0a0a0a]">
+            <div className="p-10 flex items-center gap-4">
+              <div className="w-12 h-12 bg-[#00e676] rounded-2xl flex items-center justify-center shadow-lg shadow-[#00e676]/20 overflow-hidden">
                 <img
                   src="assets/icon.png"
                   alt="Logo"
                   className="w-full h-full object-cover"
                   onError={(e) => {
-                    // Fallback to Play icon if icon.png is not found
                     e.currentTarget.style.display = 'none';
-                    e.currentTarget.parentElement!.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-play text-black fill-current"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+                    e.currentTarget.parentElement!.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-play text-black fill-current"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
                   }}
                 />
               </div>
-              <h1 className="text-2xl font-black tracking-tighter italic">HAYATE<span className="text-[#00e676]">TV</span></h1>
+              <h1 className="text-3xl font-black tracking-tighter italic">HAYATE<span className="text-[#00e676]">TV</span></h1>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 space-y-1">
+            <div className="flex-1 overflow-y-auto px-6 space-y-2">
               {groups.map((group, idx) => (
                 <div
                   key={group}
-                  className={`p-4 rounded-xl flex items-center justify-between transition-all duration-200 cursor-pointer ${
+                  className={`p-5 rounded-2xl flex items-center justify-between transition-all duration-200 cursor-pointer ${
                     (viewState === 'groupList' && groupIndex === idx) || (viewState === 'channelList' && selectedGroup === group)
-                      ? 'bg-[#00e676] text-black font-bold scale-105 shadow-lg'
-                      : 'hover:bg-white/5 text-white/60'
+                      ? 'bg-[#00e676] text-black font-bold scale-105 shadow-xl'
+                      : 'hover:bg-white/5 text-white/40'
                   }`}
                   onClick={() => handleGroupSelect(group)}
                 >
-                  <div className="flex items-center gap-3">
-                    <List size={18} />
-                    <span className="truncate">{group}</span>
+                  <div className="flex items-center gap-4">
+                    <List size={22} />
+                    <span className="text-lg truncate">{group}</span>
                   </div>
-                  {group === 'RAKUTEN' && !unlockedGroups.has(group) && <Lock size={16} />}
+                  {group === 'RAKUTEN' && !unlockedGroups.has(group) && <Lock size={18} />}
                 </div>
               ))}
             </div>
 
             <div
-              className={`p-6 border-t border-white/10 flex items-center gap-3 cursor-pointer transition-colors ${viewState === 'settings' ? 'bg-[#00e676] text-black' : 'hover:bg-white/5 text-white/50'}`}
+              className={`p-8 border-t border-white/5 flex items-center gap-4 cursor-pointer transition-colors ${viewState === 'settings' ? 'bg-[#00e676] text-black' : 'hover:bg-white/5 text-white/30'}`}
               onClick={() => setViewState('settings')}
             >
-              <Settings size={20} />
-              <span className="font-bold">{t.settings}</span>
+              <Settings size={24} />
+              <span className="text-lg font-bold">{t.settings}</span>
             </div>
           </div>
 
           {/* Channel List */}
-          <div className="flex-1 h-full flex flex-col">
-            <div className="p-8 flex justify-between items-end">
+          <div className="flex-1 h-full flex flex-col bg-[#050505]">
+            <div className="p-10 flex justify-between items-end">
               <div>
-                <h2 className="text-4xl font-black tracking-tight">{selectedGroup}</h2>
-                <p className="text-white/40 font-medium">{filteredChannels.length} Channels</p>
+                <h2 className="text-5xl font-black tracking-tight text-white">{selectedGroup}</h2>
+                <p className="text-white/30 font-bold mt-2 uppercase tracking-widest text-sm">{filteredChannels.length} Channels Available</p>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-mono font-bold text-[#00e676]">
+                <p className="text-4xl font-mono font-black text-[#00e676]">
                   {new Date().toLocaleTimeString(settings.language, { hour: '2-digit', minute: '2-digit' })}
                 </p>
-                <p className="text-xs text-white/30 uppercase tracking-widest font-bold">
-                  {settings.useInternetTime ? 'Network Time' : settings.timezone}
+                <p className="text-xs text-white/20 uppercase tracking-[0.3em] font-black mt-1">
+                  {settings.useInternetTime ? 'Network Sync' : settings.timezone}
                 </p>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-8 pb-8 space-y-3">
+            <div className="flex-1 overflow-y-auto px-10 pb-10 space-y-4">
               {filteredChannels.map((channel, idx) => {
                 const now = getNowPlaying(channel);
-                if (idx === 0 && epg.length > 0) {
-                  console.log(`First channel: ${channel.name}, Now playing:`, now);
-                }
                 return (
                   <div
                     key={channel.id}
-                    className={`group p-4 rounded-2xl flex items-center gap-6 transition-all duration-300 cursor-pointer border ${
+                    className={`group p-5 rounded-3xl flex items-center gap-8 transition-all duration-300 cursor-pointer border-2 ${
                       viewState === 'channelList' && selectedIndex === idx
                         ? 'bg-white text-black border-white scale-[1.02] shadow-2xl'
-                        : 'bg-white/5 border-white/5 hover:bg-white/10 text-white'
+                        : 'bg-white/5 border-transparent hover:bg-white/10 text-white'
                     }`}
                     onClick={() => {
                       setCurrentChannel(channel);
                       setViewState('player');
                     }}
                   >
-                    <div className="w-20 h-20 bg-black/20 rounded-xl flex items-center justify-center overflow-hidden border border-white/10">
+                    <div className="w-24 h-24 bg-black/40 rounded-2xl flex items-center justify-center overflow-hidden border border-white/5">
                       {channel.logo ? (
-                        <img src={channel.logo} alt="" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                        <img
+                          src={channel.logo}
+                          alt=""
+                          className="w-full h-full object-contain p-2"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const parent = e.currentTarget.parentElement;
+                            if (parent) {
+                              const icon = document.createElement('div');
+                              icon.className = 'text-white/10';
+                              icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-tv"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="7 2 12 7 17 2"/></svg>';
+                              parent.appendChild(icon);
+                            }
+                          }}
+                        />
                       ) : (
-                        <Play className={viewState === 'channelList' && selectedIndex === idx ? 'text-black' : 'text-white/20'} />
+                        <Play size={32} className={viewState === 'channelList' && selectedIndex === idx ? 'text-black' : 'text-white/20'} />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-xl font-bold truncate">{channel.name}</h3>
-                      {now && (
-                        <div className="mt-1 flex items-center gap-2">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase flex-shrink-0 ${viewState === 'channelList' && selectedIndex === idx ? 'bg-black text-white' : 'bg-[#00e676] text-black'}`}>LIVE</span>
+                      <h3 className="text-2xl font-black truncate">{channel.name}</h3>
+                      {now ? (
+                        <div className="mt-2 flex items-center gap-3">
+                          <span className={`text-xs px-2 py-1 rounded-md font-black uppercase flex-shrink-0 ${viewState === 'channelList' && selectedIndex === idx ? 'bg-black text-white' : 'bg-[#00e676] text-black'}`}>LIVE</span>
                           <MarqueeText
                             text={now.title}
-                            className={`text-sm font-medium flex-1 ${viewState === 'channelList' && selectedIndex === idx ? 'text-black/60' : 'text-white/40'}`}
+                            className={`text-lg font-bold flex-1 ${viewState === 'channelList' && selectedIndex === idx ? 'text-black/70' : 'text-white/40'}`}
                           />
                         </div>
+                      ) : (
+                        <p className={`text-lg font-bold mt-2 ${viewState === 'channelList' && selectedIndex === idx ? 'text-black/40' : 'text-white/20 italic'}`}>No program info</p>
                       )}
                     </div>
                     {viewState === 'channelList' && selectedIndex === idx && (
-                      <ChevronRight className="text-black" />
+                      <ChevronRight size={32} className="text-black" />
                     )}
                   </div>
                 );
@@ -439,36 +515,56 @@ const App: React.FC = () => {
 
           {/* Right Info Panel */}
           {viewState === 'channelList' && filteredChannels[selectedIndex] && (
-            <div className="w-96 h-full bg-black/60 backdrop-blur-2xl border-l border-white/10 p-8 flex flex-col gap-8">
-              <div className="aspect-video bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
-                {filteredChannels[selectedIndex].logo && (
-                  <img src={filteredChannels[selectedIndex].logo} alt="" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+            <div className="w-[30vw] h-full bg-[#0a0a0a] border-l border-white/5 p-10 flex flex-col gap-10">
+              <div className="aspect-video bg-black rounded-3xl overflow-hidden border border-white/5 shadow-2xl flex items-center justify-center">
+                {filteredChannels[selectedIndex].logo ? (
+                  <img
+                    src={filteredChannels[selectedIndex].logo}
+                    alt=""
+                    className="w-full h-full object-contain p-4"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const parent = e.currentTarget.parentElement;
+                      if (parent) {
+                        const icon = document.createElement('div');
+                        icon.className = 'text-white/5';
+                        icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-tv"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="7 2 12 7 17 2"/></svg>';
+                        parent.appendChild(icon);
+                      }
+                    }}
+                  />
+                ) : (
+                  <Tv size={80} className="text-white/5" />
                 )}
               </div>
 
-              <div className="space-y-6">
-                <div className="space-y-1">
-                  <h4 className="text-xs font-black text-[#00e676] uppercase tracking-[0.2em]">{t.nowPlaying}</h4>
-                  <div className="p-4 bg-white/5 rounded-xl border border-white/5">
+              <div className="space-y-8">
+                <div className="space-y-2">
+                  <h4 className="text-sm font-black text-[#00e676] uppercase tracking-[0.3em]">{t.nowPlaying}</h4>
+                  <div className="p-6 bg-white/5 rounded-3xl border border-white/5">
                     {getNowPlaying(filteredChannels[selectedIndex]) ? (
                       <>
-                        <p className="font-bold text-lg leading-tight">{getNowPlaying(filteredChannels[selectedIndex])?.title}</p>
-                        <p className="text-sm text-white/40 mt-2 line-clamp-3">{getNowPlaying(filteredChannels[selectedIndex])?.desc}</p>
+                        <p className="font-black text-2xl leading-tight">{getNowPlaying(filteredChannels[selectedIndex])?.title}</p>
+                        <p className="text-lg text-white/40 mt-4 leading-relaxed line-clamp-6">{getNowPlaying(filteredChannels[selectedIndex])?.desc}</p>
                       </>
                     ) : (
-                      <p className="text-white/30 italic">{t.noProgram}</p>
+                      <p className="text-white/20 italic text-lg">{t.noProgram}</p>
                     )}
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <h4 className="text-xs font-black text-white/30 uppercase tracking-[0.2em]">{t.next}</h4>
-                  <div className="p-4 bg-white/5 rounded-xl border border-white/5">
-                    {getNextProgram(filteredChannels[selectedIndex]) ? (
-                      <p className="font-bold text-white/60">{getNextProgram(filteredChannels[selectedIndex])?.title}</p>
-                    ) : (
-                      <p className="text-white/20 italic">{t.noProgram}</p>
-                    )}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-black text-white/20 uppercase tracking-[0.3em]">Channel Details</h4>
+                  <div className="p-6 bg-white/5 rounded-3xl border border-white/5 space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/40 font-bold">Group</span>
+                      <span className="font-black text-[#00e676]">{filteredChannels[selectedIndex].group}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/40 font-bold">ID</span>
+                      <span className="font-mono text-sm">{filteredChannels[selectedIndex].tvgId || 'N/A'}</span>
+                    </div>
                   </div>
                 </div>
               </div>

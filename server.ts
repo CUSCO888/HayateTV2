@@ -12,16 +12,19 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // 终极暴力 CORS 配置
-  app.use((req, res, next) => {
-    // 强制允许所有来源，不使用 Credentials 以获得最大兼容性
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Access-Control-Max-Age", "86400");
+  // 使用官方 CORS 插件，这是最稳妥的方案
+  app.use(cors({
+    origin: true, // 动态反射 Origin，解决 localhost 跨域
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+    credentials: true,
+    maxAge: 86400
+  }));
 
-    if (req.method === "OPTIONS") {
-      return res.status(200).end();
+  // 辅助日志中间件
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/api/')) {
+      console.log(`[API Request] ${new Date().toISOString()} - ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
     }
     next();
   });
@@ -30,7 +33,7 @@ async function startServer() {
 
   // Debug API
   app.get("/api/version", (req, res) => {
-    res.json({ version: "2.7", node_env: process.env.NODE_ENV });
+    res.json({ version: "3.4", status: "running" });
   });
 
   // Remote Input State (In-memory for simplicity)
@@ -50,14 +53,14 @@ async function startServer() {
     try {
       console.log(`[Proxy] Fetching: ${targetUrl}`);
       const response = await axios.get(targetUrl, {
-        responseType: "arraybuffer",
+        responseType: "text",
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         },
         timeout: 15000
       });
 
-      res.set("Content-Type", response.headers["content-type"] || "text/plain");
+      res.set("Content-Type", "text/plain; charset=utf-8");
       res.send(response.data);
     } catch (error: any) {
       console.error("Proxy error:", error.message);
