@@ -24,19 +24,37 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          npm install -D @capacitor/assets @capacitor/cli
 
       - name: Build Web App
         run: npm run build
 
-      - name: Add Android Platform if missing
+      - name: Initialize & Fix Android Project
         run: |
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
+          # 1. 重新创建 Android 工程
+          if [ -d "android" ]; then rm -rf android; fi
+          npx cap add android
 
-      - name: Sync Capacitor
-        run: npx cap sync android
+          # 2. 优化图标生成逻辑
+          if [ -f "assets/icon.png" ]; then
+            # 增加 --icon-only 参数，防止它去寻找不存在的 background/foreground
+            npx capacitor-assets generate --android --icon-only
+            
+            # 补丁：删除可能导致报错的 XML 引用
+            rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+            rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          else
+            echo "::warning::未找到 assets/icon.png"
+          fi
+          
+          # 3. 动态修复 Kotlin 冲突
+          sed -i 's/kotlin_version = .*/kotlin_version = "1.9.20"/' android/build.gradle
+          echo "configurations.all { resolutionStrategy.eachDependency { details -> if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.contains('kotlin-stdlib-jdk')) { details.useTarget(\"org.jetbrains.kotlin:kotlin-stdlib:\${details.requested.version}\") } } }" >> android/app/build.gradle
+          
+          # 4. 同 Web 资源并同步 Capacitor
+          npx cap sync android
 
       - name: Make Gradlew Executable
         run: chmod +x android/gradlew
@@ -49,5 +67,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: hayatetv-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
