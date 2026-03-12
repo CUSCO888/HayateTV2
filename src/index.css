@@ -1,1 +1,22 @@
 @import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-[#0a0a0a] text-white overflow-hidden;
+    background-color: #0a0a0a;
+    color: white;
+  }
+}
+
+/* TV Focus styles */
+:focus {
+  outline: 3px solid #00e676 !important;
+  outline-offset: 2px;
+}
+
+/* Ensure full screen on older WebViews */
+#root {
+  width: 100vw;
+  height: 100vh;
+  background-color: #0a0a0a;
+}

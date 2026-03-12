@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import path from "path";
 import { fileURLToPath } from "url";
+import cors from "cors";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +12,26 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // 终极暴力 CORS 配置
+  app.use((req, res, next) => {
+    // 强制允许所有来源，不使用 Credentials 以获得最大兼容性
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Max-Age", "86400");
+
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+    next();
+  });
+
   app.use(express.json());
+
+  // Debug API
+  app.get("/api/version", (req, res) => {
+    res.json({ version: "2.7", node_env: process.env.NODE_ENV });
+  });
 
   // Remote Input State (In-memory for simplicity)
   let remoteInputData = {
@@ -28,19 +48,20 @@ async function startServer() {
     }
 
     try {
+      console.log(`[Proxy] Fetching: ${targetUrl}`);
       const response = await axios.get(targetUrl, {
         responseType: "arraybuffer",
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         },
-        timeout: 10000
+        timeout: 15000
       });
 
-      res.set("Content-Type", response.headers["content-type"]);
-      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Content-Type", response.headers["content-type"] || "text/plain");
       res.send(response.data);
     } catch (error: any) {
       console.error("Proxy error:", error.message);
+      // 即使报错也要确保有 CORS 头
       res.status(500).send("Proxy error: " + error.message);
     }
   });

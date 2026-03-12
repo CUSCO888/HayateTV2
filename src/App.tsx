@@ -22,6 +22,14 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Detect API Base URL
+  const API_BASE = useMemo(() => {
+    // 预览环境：如果是 .run.app 结尾，使用相对路径
+    if (window.location.hostname.includes('run.app')) return '';
+    // 电视环境：强制指向云端
+    return 'https://ais-dev-xzne2da2oxzmo2zwn7pq56-204444045691.asia-northeast1.run.app';
+  }, []);
+
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('hayate_settings');
     if (saved) return JSON.parse(saved);
@@ -55,22 +63,24 @@ const App: React.FC = () => {
 
   // Load Data
   const loadPlaylist = useCallback(async () => {
-    console.log("loadPlaylist triggered. Current settings.epgUrl:", settings.epgUrl);
-    setLoading(true);
     const url = settings.playlistMode === 'default' ? DEFAULT_M3U_URL : settings.customPlaylistUrl;
-    if (!url) {
-      console.log("No playlist URL to load");
-      setLoading(false);
-      return;
-    }
+    if (!url) return;
+
+    console.log("loadPlaylist triggered (v2.7). URL:", url);
+    setLoading(true);
+    setError(null);
 
     try {
-      const proxyUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
-      const res = await axios.get(proxyUrl, { responseType: 'text' });
-      const content = typeof res.data === 'string' ? res.data : new TextDecoder().decode(res.data);
-      console.log("Playlist content (first 100 chars):", content.substring(0, 100));
+      const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(url)}&t=${Date.now()}`;
+      console.log("Fetching from:", proxyUrl);
+
+      const response = await fetch(proxyUrl);
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const content = await response.text();
+      console.log("Playlist loaded successfully. Length:", content.length);
       const { channels: parsedChannels, epgUrl: detectedEpg } = parseM3U(content);
-      console.log("Parsed M3U. Detected EPG:", detectedEpg);
       setChannels(parsedChannels);
 
       if (detectedEpg && !settings.epgUrl) {
@@ -100,7 +110,7 @@ const App: React.FC = () => {
     }
     console.log("Loading EPG from:", settings.epgUrl);
     try {
-      const proxyUrl = `/api/proxy?url=${encodeURIComponent(settings.epgUrl)}`;
+      const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(settings.epgUrl)}`;
       const res = await axios.get(proxyUrl);
       const parsedEPG = parseEPG(res.data);
       console.log(`Parsed ${parsedEPG.length} EPG programs`);
@@ -134,7 +144,9 @@ const App: React.FC = () => {
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await axios.get('/api/remote-input/poll');
+        const res = await axios.get(`${API_BASE}/api/remote-input/poll?t=${Date.now()}`, {
+          withCredentials: false
+        });
         if (res.data.timestamp > (Number(localStorage.getItem('last_remote_ts')) || 0)) {
           localStorage.setItem('last_remote_ts', res.data.timestamp.toString());
           setSettings(prev => ({
@@ -281,6 +293,25 @@ const App: React.FC = () => {
     return <div className="fixed inset-0 bg-black flex items-center justify-center text-white text-2xl">{t.loading}</div>;
   }
 
+  if (error && channels.length === 0) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center text-white p-10 text-center">
+        <div className="text-red-500 text-4xl mb-4 font-bold">Network Error</div>
+        <p className="text-xl text-white/60 mb-8 max-w-md">{error}</p>
+        <div className="text-sm text-white/30 mb-8 font-mono bg-white/5 p-4 rounded-lg">
+          API: {API_BASE || 'Internal'}<br/>
+          Origin: {window.location.origin}
+        </div>
+        <button
+          onClick={() => loadPlaylist()}
+          className="px-8 py-4 bg-[#00e676] text-black font-bold rounded-xl hover:scale-105 transition-transform"
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-[#0a0a0a] text-white font-sans overflow-hidden select-none">
       {currentChannel && (
@@ -300,7 +331,7 @@ const App: React.FC = () => {
             <div className="p-8 flex items-center gap-3">
               <div className="w-10 h-10 bg-[#00e676] rounded-xl flex items-center justify-center shadow-lg shadow-[#00e676]/20 overflow-hidden">
                 <img
-                  src="/assets/icon.png"
+                  src="assets/icon.png"
                   alt="Logo"
                   className="w-full h-full object-cover"
                   onError={(e) => {

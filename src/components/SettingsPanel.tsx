@@ -20,9 +20,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings: initialSettings
   }, [initialSettings]);
 
   useEffect(() => {
-    // In this environment, we use the APP_URL provided
-    const url = window.location.origin;
-    setIp(url);
+    // Use the remote APP_URL for the QR code and remote input
+    const remoteUrl = 'https://ais-dev-xzne2da2oxzmo2zwn7pq56-204444045691.asia-northeast1.run.app';
+    setIp(remoteUrl);
   }, []);
 
   const timezones = Array.from({ length: 25 }, (_, i) => {

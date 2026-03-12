@@ -9,9 +9,32 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 </head>
-<body>
-<div id="root"></div>
-<script type="module" src="/src/main.tsx"></script>
+<body style="background: #000000; margin: 0; color: white;">
+<div id="root">
+  <div id="loading-status" style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; background: #000000;">
+    Loading Hayate IPTV... (v2.7)
+  </div>
+</div>
+<script>
+  // 自救代码：如果 JS 报错，直接在屏幕上显示
+  window.onerror = function(msg, url, line, col, error) {
+    var div = document.createElement('div');
+    div.style.cssText = 'position:fixed;top:0;left:0;z-index:9999;background:white;color:red;padding:10px;font-size:14px;word-break:break-all;';
+    div.innerText = 'ERR: ' + msg + '\nAt: ' + url + ':' + line;
+    document.body.appendChild(div);
+    return false;
+  };
+  // 检查资源加载
+  window.addEventListener('error', function(e) {
+    if (e.target.tagName === 'SCRIPT') {
+      var div = document.createElement('div');
+      div.style.cssText = 'position:fixed;bottom:0;left:0;z-index:9999;background:yellow;color:black;padding:10px;';
+      div.innerText = 'File Load Fail: ' + e.target.src;
+      document.body.appendChild(div);
+    }
+  }, true);
+</script>
+<script type="module" src="./src/main.tsx"></script>
 </body>
 </html>
 
