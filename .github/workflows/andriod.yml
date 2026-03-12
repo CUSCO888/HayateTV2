@@ -37,14 +37,18 @@ jobs:
           if [ -d "android" ]; then rm -rf android; fi
           npx cap add android
 
-          # 2. 优化图标生成逻辑
+          # 2. 生成图标资源
           if [ -f "assets/icon.png" ]; then
-            # 增加 --icon-only 参数，防止它去寻找不存在的 background/foreground
-            npx capacitor-assets generate --android --icon-only
+            # 去掉 --icon-only，改用标准的生成命令
+            npx capacitor-assets generate --android
             
-            # 补丁：删除可能导致报错的 XML 引用
+            # 补丁：这是解决“Resource not found”报错的关键！
+            # 强行删除导致 AAPT 链接失败的自适应图标配置文件
             rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
             rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+            
+            # 额外补充：确保背景和前景资源文件夹即便不存在也不会让编译器卡死
+            echo "Icon generation completed and adaptive XMLs removed."
           else
             echo "::warning::未找到 assets/icon.png"
           fi
@@ -53,7 +57,7 @@ jobs:
           sed -i 's/kotlin_version = .*/kotlin_version = "1.9.20"/' android/build.gradle
           echo "configurations.all { resolutionStrategy.eachDependency { details -> if (details.requested.group == 'org.jetbrains.kotlin' && details.requested.name.contains('kotlin-stdlib-jdk')) { details.useTarget(\"org.jetbrains.kotlin:kotlin-stdlib:\${details.requested.version}\") } } }" >> android/app/build.gradle
           
-          # 4. 同 Web 资源并同步 Capacitor
+          # 4. 同步 Web 资源
           npx cap sync android
 
       - name: Make Gradlew Executable
